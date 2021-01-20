@@ -1,0 +1,144 @@
+#Import package
+library(tidyverse)
+library(lattice)
+library(tm)
+library(e1071)
+library(caret)
+library(dplyr)
+library(vroom)
+library(here)
+
+features_rds_path = "classifier/features.rds"
+naive_bayes_rda_path = "classifier/NaiveBayesClassifier.rda"
+# Membersihkan data dan merubah data menjadi bentuk corpus
+clean_data <- function(data) {
+  corpus <- VCorpus(VectorSource(data))
+  
+  corpus_clean <- tm_map(corpus, content_transformer(tolower))
+  corpus_clean <- tm_map(corpus_clean, removeNumbers)
+  corpus_clean <- tm_map(corpus_clean, removeWords, stopwords())
+  corpus_clean <- tm_map(corpus_clean, removePunctuation)
+  corpus_clean <- tm_map(corpus_clean, stripWhitespace)
+  
+  return(corpus_clean)
+}
+
+# Menerapkan features dan mengubah data menjadi document term matrix
+apply_feature <- function(corpus, features) {
+  dtm <- DocumentTermMatrix(corpus, control = list(dictionary = features))
+  return(apply(dtm, 2, convert_count))
+}
+
+# Mengubah jumlah kemunculan kata menjadi "Yes" dan "No"
+convert_count <- function(x) {
+  #y <- ifelse(x >= 3, 1,0)
+  y <- ifelse(x > 0, 1,0)
+  y <- factor(y, levels=c(0,1), labels=c("No", "Yes"))
+  return(y)
+}
+
+# Traning naive bayes model untuk membuat modelnya
+train_model = function(){
+  setwd("D:/FAHMI/sem5/praktikum data science/project/last project")
+  dataset = read.csv("dataset/hotel_reviews.csv")
+  #my_dataset = read.csv(vroom(here("dataset", "hotel_reviews.csv")), stringsAsFactors = F)
+  
+  #glimpse(dataset)
+  #mengubah data menjadi positive dan negative pada rating
+  dataset$Rating = ifelse(dataset$Rating >= 3, "Positive", "Negative")
+  
+  #ambil kolom review dan rating
+  hotel_review = dataset %>%
+    select(text = Review, class = Rating)
+  
+  hotel_review$class = as.factor(hotel_review$class)
+  
+  #glimpse(hotel_review)
+  
+  positive_review = hotel_review %>%
+    filter(class == "Positive") %>% 
+    sample_n(1500)
+  
+  negative_review = hotel_review %>%
+    filter(class == "Negative") %>%
+    sample_n(1500)
+  
+  
+  hotel_review = rbind(positive_review, negative_review)
+  
+  #hotel_review %>% 
+  #count(class)
+  
+  #view(hotel_review)
+  
+  #acak data agar tidak berurutan
+  set.seed(1)
+  hotel_review = hotel_review[sample(nrow(hotel_review)),]
+  
+  #cleaning dataset
+  corpus_clean = clean_data(hotel_review$text)
+  
+  #mengubah corpus jadi dtm
+  dtm = DocumentTermMatrix(corpus_clean)
+  
+  # partisi data test dan training yaitu 1:3
+  hotel_review_train = hotel_review[1:2250,]
+  hotel_review_test = hotel_review[2251:3000,]
+  
+  
+  corpus_clean_train = corpus_clean[1:2250]
+  corpus_clean_test = corpus_clean[2251:3000]
+  
+  dtm_train = dtm[1:2250,]
+  dtm_test = dtm[2251:3000,]
+  
+  dim(dtm_test)
+  dim(dtm_train)
+  
+  # Feature selection, ambil kata yang muncul minimal 5kali
+  freq = findFreqTerms(dtm_train,5)
+  #length(fiveFreq)
+  
+  #set directory tempan simpan feature yang digunakan
+  #setwd("D:/FAHMI/sem5/praktikum data science/Project InshaAllah/classifier")
+  #save featurenya
+  saveRDS(freq, features_rds_path)
+  
+  #sesuaikan fitur pada data train dan test dengan fitur yang sudah diseleksi sebelumnya
+  dtm_train_nb = corpus_clean_train %>%
+    DocumentTermMatrix(control=list(dictionary = freq))
+  
+  dtm_test_nb = corpus_clean_test %>%
+    DocumentTermMatrix(control=list(dictionary = freq))
+  
+  trainNb = apply(dtm_train_nb,2,convert_count)
+  testNb = apply(dtm_test_nb,2,convert_count)
+  
+  #view(testNb)
+  
+  #membuat model naive bayes dari data training 
+  classifier = naiveBayes(trainNb, hotel_review_train$class, laplace=1)
+  
+  #set directory model naive bayes disimpan
+  #setwd("D:/FAHMI/sem5/praktikum data science/Project InshaAllah/classifier")
+  
+  save(classifier, file = naive_bayes_rda_path)
+  
+  prediction = predict(classifier, newdata = testNb)
+  confus_mat = confusionMatrix(table(Prediction = prediction, Actual = hotel_review_test$class))
+  confus_mat
+}
+
+# Prediksi sentimen
+predict_sentiment <- function(review) {
+  features <- readRDS(features_rds_path)
+  model <- get(load(naive_bayes_rda_path))
+  
+  data.corpus <- clean_data(review)
+  data.test <- apply_feature(data.corpus, features = features)
+  prediction <- predict(model, newdata = data.test) 
+  return(data.frame(comment = review, sentiment = prediction))
+}
+
+# Hapus komentar untuk traning data
+#train_model()

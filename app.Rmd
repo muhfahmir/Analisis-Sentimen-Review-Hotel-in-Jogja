@@ -1,0 +1,294 @@
+---
+title: "Project Akhir Data Science"
+author: 'Hilmy Haidar/123180073, Muhamad Fahmi Rahmatullah/123180108'
+date: "1/16/2021"
+output: 
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**`global`**
+```{r global}
+library(shiny)
+library(shinycssloaders)
+library(wordcloud)
+library(ggplot2)
+library(shinydashboard)
+library(dplyr)
+library(tidytext)
+library(DT)
+
+#function untuk get data dari url (scrapping)
+source("scrapper/review.R")
+
+#function untuk menentukan data training dan sentimen pada sebuah review 
+source("classifier/naive_bayes.R")
+
+features <- readRDS('classifier/features.rds')
+hotel <- readRDS("data/hotel.rds")
+
+```
+
+**`ui`**
+```{r ui}
+#ini buat tampilan / Front End
+ui <- dashboardPage(
+  #judul website 
+  dashboardHeader(title = "Hotel Review in Jogja"),
+  #sebelah kiri
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Dashboard", tabName = "dashboard", icon = icon("dashboard")),
+      menuItem("Wordcloud & Histogram", tabName = "wdsh", icon = icon("poll")),
+      menuItem("Author", tabName = "author",icon = icon("pen"))
+    )
+  ),
+  #sebelah kanan
+  dashboardBody(
+    tags$style(HTML("
+                    .box.box-solid.box-primary>.box-header {
+                    background:#000000
+                    }
+                    .box.box-solid.box-primary{
+                    border-color:#000000;
+                    background:#48A868
+                    }
+                    .btn{
+                    width: 100%
+                    }
+                    .control-label h5{
+                    color: white;
+                    }
+                    ")),
+    tabItems(
+      tabItem(
+        tabName = "dashboard",
+        #3box diatas
+        fluidRow(
+          valueBoxOutput("total_review"),
+          valueBoxOutput("positive_review"),
+          valueBoxOutput("negative_review")
+        ),
+        box(
+          fluidRow(
+            box(
+              #select
+              selectInput(
+                        "selecthotel",
+                        label = (""),
+                        setNames(hotel$link, hotel$name)
+              ),
+              status = "primary",
+              width=12,
+              solidHeader = T,
+            )
+          ),
+          fluidRow(
+            box(
+              #input data yang ingin ditampilkan
+              sliderInput(
+                "size",
+                "Total reviews",
+                min = 0,
+                max = 1000,
+                value = 20
+              ),
+              width=12,
+              solidHeader = T
+            )
+          ),
+          fluidRow(
+            box(
+              #tombol submit
+              fluidPage(
+                submitButton("Submit"),
+              ),
+              width = 12,
+              solidHeader = T
+            )
+          ),
+          width = 12,
+          solidHeader = T,
+          collapsible = T,
+          title = "Pilih Hotel",
+        ),
+        #hasil sentimen
+        fluidRow(
+          box(
+            title = "Sentimen Analisis",
+            solidHeader = T,
+            width = 12,
+            collapsible = T,
+            div(DT::dataTableOutput("table_review") %>% withSpinner(color="#1167b1"),
+                style = "font-size: 70%;")
+          ),
+        ),
+
+        fluidRow(
+          valueBox(
+            "Muh Fahmi R",
+            paste0("123180108"),
+            icon = icon("pen"),
+            color = "fuchsia",
+            width = 6
+          ),
+          valueBox(
+            "Hilmy Haidar",
+            paste0("123180073"),
+            icon = icon("pen"),
+            color = "red",
+            width = 6
+          )
+        )
+      ),
+      tabItem(
+        tabName = "wdsh",
+        #hasil cloud
+        fluidRow(
+          box(title = "Wordcloud",
+              solidHeader = T,
+              width = 12,
+              collapsible = T,
+              plotOutput("wordcloud") %>% withSpinner(color="#1167b1")
+          ),
+          
+          
+        ),
+        #hasil cloud
+        fluidRow(
+          box(title = "Sentimen Umum",
+              solidHeader = T,
+              width = 12,
+              collapsible = T,
+              plotOutput("plot") %>% withSpinner(color="#1167b1")
+          ),
+          
+          
+        ),
+        fluidRow(
+          valueBox(
+            "Muh Fahmi R",
+            paste0("123180108"),
+            icon = icon("pen"),
+            color = "fuchsia",
+            width = 6
+          ),
+          valueBox(
+            "Hilmy Haidar",
+            paste0("123180073"),
+            icon = icon("pen"),
+            color = "red",
+            width = 6
+          )
+        )
+      ),
+      tabItem(
+        tabName = "author",
+        fluidRow(
+          valueBox(
+            "Muh Fahmi R",
+            paste0("123180108"),
+            icon = icon("pen"),
+            color = "fuchsia",
+            width = 6
+          ),
+          valueBox(
+            "Hilmy Haidar",
+            paste0("123180073"),
+            icon = icon("pen"),
+            color = "red",
+            width = 6
+          )
+        )
+      )
+    )
+    
+  )
+)
+```
+
+**`server`**
+```{r server}
+#pemrosesan data / Backend
+server <- function(input, output) {
+
+  #get data
+  data <- reactive({
+    withProgress({
+      setProgress(message = "Collecting data", value = 0)
+      
+      result <- get_hotel_reviews(input$selecthotel, input$size, incProgress)
+    })
+    
+    #mengembalikan hasil scrapping
+    return(result)
+  })
+  
+  #memprediksi data
+  prediction_data <- reactive({
+    withProgress({
+      setProgress(message = "Predicting sentiment", value = 0)
+      
+      reviews <- data()$review
+      incProgress(1/2)
+      prediction <- predict_sentiment(reviews)
+      incProgress(1/2)
+    })
+    prediction$reviewer <- data()$reviewer
+    
+    return(prediction)
+  })
+  #mengeluarkan data dalam bentuk table
+  output$table_review <- renderDataTable(datatable({
+    prediction_data()
+  }))
+  #data total review diatas
+  output$total_review <- renderValueBox({
+    valueBox(
+      "Total", 
+      paste0(nrow(prediction_data()), " review"),
+      icon = icon("pen"),
+      color = "blue"
+    )
+  })
+  
+  #mengeluarkan data diatas yang positive jumlahnya
+  output$positive_review <- renderValueBox({
+    valueBox(
+      "Positive", 
+      paste0(nrow(prediction_data() %>% filter(sentiment == "Positive")), " review"),
+      icon = icon("smile"),
+      color = "green")
+  })
+  #mengeluarkan data diatas yang negatif jumlahnya
+  output$negative_review <- renderValueBox({
+    valueBox(
+      "Negative",
+      paste0(nrow(prediction_data() %>% filter(sentiment == "Negative")), " review"), 
+      icon = icon("frown"),
+      color = "red")
+  })
+  #mengeluarkan data wordcloud / data yang sering disebut
+  output$wordcloud <- renderPlot({
+    data.corpus <- clean_data(data()$review)
+    wordcloud(data.corpus, min.freq = 1, 
+            scale=c(3.5,0.25),
+            max.words=200, random.order=FALSE, rot.per=0.35,    
+            colors=brewer.pal(8, "Dark2"))
+  })
+  
+  output$plot <- renderPlot({
+    Total <- nrow(prediction_data()) / 1000
+    Classfication <- prediction_data()$sentiment
+    ggplot(prediction_data(), aes(x = Classfication, y =Total, fill=Classfication)) + geom_col()
+  })
+}
+```
+
+**`run-app`**
+```{r run-app}
+shinyApp(ui = ui, server = server)
+```
