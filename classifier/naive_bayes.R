@@ -137,7 +137,7 @@ predict_sentiment <- function(review) {
   data.corpus <- clean_data(review)
   data.test <- apply_feature(data.corpus, features = features)
   prediction <- predict(model, newdata = data.test) 
-  return(data.frame(comment = review, sentiment = prediction))
+  return(data.frame(review = review, sentiment = prediction))
 }
 
 # Hapus komentar untuk traning data
